@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trader Robô Mobile - IQOption</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <header class="header">
+            <h1>🤖 Trader Robô Mobile</h1>
+            <div class="user-info" id="userInfo">
+                <span>Não conectado</span>
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            <!-- LOGIN SECTION -->
+            <section id="loginSection" class="section active">
+                <h2>Login IQOption</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="email">Email:</label>
+                        <input type="email" id="email" placeholder="seu@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Senha:</label>
+                        <input type="password" id="password" placeholder="Sua senha" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="accountType">Tipo de Conta:</label>
+                        <select id="accountType" required>
+                            <option value="REAL">Conta Real</option>
+                            <option value="DEMO">Conta Demo</option>
+                            <option value="TOURNAMENT">Torneio</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Conectar</button>
+                    <p class="info">⚠️ Suas credenciais são mantidas seguras localmente</p>
+                </form>
+            </section>
+
+            <!-- DASHBOARD SECTION -->
+            <section id="dashboardSection" class="section">
+                <!-- Account Status -->
+                <div class="account-status">
+                    <div class="status-box">
+                        <label>Saldo:</label>
+                        <span id="balance" class="value">R$ 0,00</span>
+                    </div>
+                    <div class="status-box">
+                        <label>Lucro/Prejuízo:</label>
+                        <span id="profitLoss" class="value">R$ 0,00</span>
+                    </div>
+                    <div class="status-box">
+                        <label>Taxa Vitória:</label>
+                        <span id="winRate" class="value">0%</span>
+                    </div>
+                </div>
+
+                <!-- Robot Configuration -->
+                <div class="config-panel">
+                    <h3>⚙️ Configuração do Robô</h3>
+                    
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="initialBet">Entrada Inicial (R$):</label>
+                            <input type="number" id="initialBet" value="6" min="0.50" step="0.50">
+                        </div>
+                        <div class="config-group">
+                            <label for="martingale">Martingale (x):</label>
+                            <input type="number" id="martingale" value="1.1" min="1" step="0.1">
+                        </div>
+                    </div>
+
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="stopWin">Stop Win (R$):</label>
+                            <input type="number" id="stopWin" value="18" min="0.50" step="0.50">
+                        </div>
+                        <div class="config-group">
+                            <label for="stopLoss">Stop Loss (R$):</label>
+                            <input type="number" id="stopLoss" value="6" min="0.50" step="0.50">
+                        </div>
+                    </div>
+
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="timeframe">Timeframe:</label>
+                            <select id="timeframe">
+                                <option value="M1">M1 (1 Minuto)</option>
+                                <option value="M5">M5 (5 Minutos)</option>
+                            </select>
+                        </div>
+                        <div class="config-group">
+                            <label for="strategy">Estratégia:</label>
+                            <select id="strategy">
+                                <option value="fluxo">Price Action Fluxo</option>
+                                <option value="reversao">Price Action Reversão</option>
+                                <option value="hibrida">Híbrida (Fluxo + Reversão)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="asset">Ativo:</label>
+                            <select id="asset">
+                                <option value="EURUSD">EUR/USD</option>
+                                <option value="GBPUSD">GBP/USD</option>
+                                <option value="USDJPY">USD/JPY</option>
+                                <option value="USDCAD">USD/CAD</option>
+                                <option value="BTCUSD">BTC/USD</option>
+                            </select>
+                        </div>
+                        <div class="config-group">
+                            <label for="expiration">Expiração:</label>
+                            <select id="expiration">
+                                <option value="1">1 minuto</option>
+                                <option value="5">5 minutos</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Robot Controls -->
+                <div class="robot-controls">
+                    <button id="startBtn" class="btn btn-success">▶️ Iniciar Robô</button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>⏹️ Parar Robô</button>
+                    <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+                </div>
+
+                <!-- Current Trade Info -->
+                <div class="trade-info" id="tradeInfo">
+                    <h3>📊 Operação Atual</h3>
+                    <div class="info-grid">
+                        <div><label>Status:</label> <span id="tradeStatus">Aguardando...</span></div>
+                        <div><label>Entrada:</label> <span id="tradeEntry">R$ 0,00</span></div>
+                        <div><label>Direção:</label> <span id="tradeDirection">-</span></div>
+                        <div><label>Preço Entrada:</label> <span id="tradePrice">0,00</span></div>
+                        <div><label>Hora:</label> <span id="tradeTime">--:--:--</span></div>
+                        <div><label>Martingale:</label> <span id="tradeMartingale">0</span></div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="chart-container">
+                    <canvas id="priceChart"></canvas>
+                </div>
+
+                <!-- History Table -->
+                <div class="history-container">
+                    <h3>📈 Histórico de Operações</h3>
+                    <table id="historyTable" class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Hora</th>
+                                <th>Ativo</th>
+                                <th>Direção</th>
+                                <th>Entrada</th>
+                                <th>Resultado</th>
+                                <th>Lucro/Prejuízo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyBody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- PROFESSIONAL ANALYSIS SECTION -->
+            <section id="analysisSection" class="section">
+                <h3>📊 Análise Profissional</h3>
+                <div class="analysis-grid">
+                    <div class="analysis-box">
+                        <h4>Suporte e Resistência</h4>
+                        <div id="supportResistance" class="analysis-content">
+                            <p>Carregando...</p>
+                        </div>
+                    </div>
+                    <div class="analysis-box">
+                        <h4>Tendência</h4>
+                        <div id="trend" class="analysis-content">
+                            <p>Carregando...</p>
+                        </div>
+                    </div>
+                    <div class="analysis-box">
+                        <h4>Volumes</h4>
+                        <div id="volumes" class="analysis-content">
+                            <p>Carregando...</p>
+                        </div>
+                    </div>
+                    <div class="analysis-box">
+                        <h4>Padrões Price Action</h4>
+                        <div id="patterns" class="analysis-content">
+                            <p>Carregando...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="footer">
+            <p>Robô Trader Mobile © 2024 | Desenvolvido para IQOption | ⚠️ Use por sua conta e risco</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/iqoption-api.js"></script>
+    <script src="js/strategies.js"></script>
+    <script src="js/analysis.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
