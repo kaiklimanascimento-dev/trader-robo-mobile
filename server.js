@@ -4,36 +4,31 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração para permitir que seu site no Chrome converse com a nuvem
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Estado inicial do robô guardado na nuvem
-let botState = { connected: false, running: false, balance: 0, lucroAtual: 0 };
+// Rota exata que o seu iqoption-api.js chama no celular
+app.post('/v1/login', async (req, res) => {
+    try {
+        console.log(`Ponte Ativa: Conectando na IQ Option para ${req.body.email}`);
 
-app.get('/status', (req, res) => res.json(botState));
+        // O Render faz o acesso direto à IQ Option aqui nos bastidores
+        const response = await fetch('https://iqoption.com/api/v1/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(req.body)
+        });
 
-// Rota que vai receber o E-mail e Senha que você digitar no Chrome
-app.post('/api/login', (req, res) => {
-    const { email, password } = req.body;
-    console.log(`Tentativa de login recebida para: ${email}`);
-    
-    // Simulando a conexão com a corretora
-    setTimeout(() => {
-        botState.connected = true;
-        botState.balance = 1000.00; // Saldo inicial simulado da sua banca
-        res.json({ success: true, message: "Conectado à corretora!", balance: botState.balance });
-    }, 1500);
+        const data = await response.json();
+        
+        // Devolve a resposta da IQ Option direto para o seu celular
+        res.json(data);
+    } catch (error) {
+        console.error("Erro na ponte com a IQ Option:", error);
+        res.status(500).json({ success: false, message: "Erro na nuvem do Render ao tentar conectar." });
+    }
 });
 
-app.post('/api/start', (req, res) => {
-    botState.running = true;
-    res.json({ success: true, message: "Robô iniciado na nuvem!" });
-});
-
-app.post('/api/stop', (req, res) => {
-    botState.running = false;
-    res.json({ success: true, message: "Robô pausado." });
-});
-
-app.listen(PORT, () => console.log(`Servidor do robô rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor Ponte rodando na porta ${PORT}`));
