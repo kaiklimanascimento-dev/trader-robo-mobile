@@ -23,11 +23,9 @@ app.post('/v1.0/login', async (req, res) => {
         const textData = await response.text();
 
         try {
-            // Tenta converter para JSON para ver se o login passou
             const jsonData = JSON.parse(textData);
             res.json(jsonData);
         } catch (e) {
-            // Se falhar, mostra o erro real retornado pela IQ Option
             res.status(400).json({ success: false, message: "Erro real: " + textData.substring(0, 100) });
         }
 
