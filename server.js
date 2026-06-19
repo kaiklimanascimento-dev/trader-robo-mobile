@@ -1,116 +1,59 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch'); // Certifique-se de que tem o node-fetch instalado
+const fetch = require('node-fetch');
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// Log de inicialização para você acompanhar no painel do Render
-console.log("Servidor do Trader Robô Mobile Inicializado.");
-
-// ==========================================
-// 1. ROTA PARA OBTER HISTÓRICO DE VELAS (CANDLES)
-// ==========================================
-app.post('/v1.0/candles/history', async (req, res) => {
-    const { active_id, period, size, right_edge } = req.body;
-    const authHeader = req.headers['authorization'];
+app.post('/v1.0/login', async (req, res) => {
+    const { email, password, account_type } = req.body;
+    console.log("Tentando login para:", email);
 
     try {
         const response = await fetch('https://iqoption.com', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': authHeader // Repassa o Token/SSID gerado pelo celular
+                'Origin': 'https://iqoption.com',
+                'Referer': 'https://iqoption.com',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
-            body: JSON.stringify({ active_id, period, size, right_edge })
+            body: JSON.stringify({ email, password, account_type })
         });
 
+        // Pega o recado exato e bruto que a IQ Option respondeu (seja texto, erro ou HTML)
         const rawResponse = await response.text();
-        let data;
-        try {
-            data = JSON.parse(rawResponse);
-        } catch (e) {
-            data = { message: rawResponse };
-        }
+        console.log("Recado bruto recebido da IQ Option:", rawResponse);
 
-        if (response.ok) {
-            res.json({ isSuccessful: true, data: data });
-        } else {
-            res.status(response.status).json({ isSuccessful: false, message: rawResponse });
-        }
-    } catch (error) {
-        console.error("Erro ao buscar histórico:", error);
-        res.status(500).json({ isSuccessful: false, message: error.message });
-    }
-});
-
-// ==========================================
-// 2. ROTA PARA ENTRAR NAS OPERAÇÕES (BUY/SELL)
-// ==========================================
-app.post('/v1.0/place-digital-option', async (req, res) => {
-    const { user_balance_id, active_id, direction, amount, expiration_period } = req.body;
-    const authHeader = req.headers['authorization'];
-
-    try {
-        const response = await fetch('https://iqoption.com', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': authHeader
-            },
-            body: JSON.stringify({ user_balance_id, active_id, direction, amount, expiration_period })
-        });
-
-        const rawResponse = await response.text();
-        let data;
-        try {
-            data = JSON.parse(rawResponse);
-        } catch (e) {
-            data = { message: rawResponse };
-        }
-
-        if (response.ok) {
-            res.json({ isSuccessful: true, data: data });
-        } else {
-            res.status(response.status).json({ isSuccessful: false, message: rawResponse });
-        }
-    } catch (error) {
-        console.error("Erro ao colocar operação:", error);
-        res.status(500).json({ isSuccessful: false, message: error.message });
-    }
-});
-
-// ==========================================
-// 3. ROTA PARA CONSULTAR SALDO ATUAL DO PERFIL
-// ==========================================
-app.get('/v1.0/profile', async (req, res) => {
-    const authHeader = req.headers['authorization'];
-
-    try {
-        const response = await fetch('https://iqoption.com', {
-            method: 'GET',
-            headers: {
-                'Authorization': authHeader
+        // Se a resposta for um JSON certinho (sucesso ou erro de senha padrão)
+        if (rawResponse.trim().startsWith('{')) {
+            const data = JSON.parse(rawResponse);
+            if (response.ok) {
+                return res.json(data);
+            } else {
+                return res.status(response.status).json({ 
+                    success: false, 
+                    message: data.message || "Erro de credenciais na IQ Option." 
+                });
             }
+        } 
+        
+        // SE A IQ OPTION MANDAR QUALQUER OUTRO RECADO (como o erro 404, bloqueio ou manutenção):
+        // Nós limpamos as tags HTML para enviar apenas o texto limpo do recado para o seu celular
+        const recadoLimpo = rawResponse.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+        
+        return res.status(response.status || 400).json({
+            success: false,
+            message: `Recado da IQ Option: ${recadoLimpo || "Sem resposta textual do servidor."}`
         });
 
-        const rawResponse = await response.text();
-        let data;
-        try {
-            data = JSON.parse(rawResponse);
-        } catch (e) {
-            data = { message: rawResponse };
-        }
-
-        if (response.ok) {
-            res.json({ isSuccessful: true, profile: data });
-        } else {
-            res.status(response.status).json({ isSuccessful: false, message: rawResponse });
-        }
     } catch (error) {
-        console.error("Erro ao obter perfil:", error);
-        res.status(500).json({ isSuccessful: false, message: error.message });
+        console.error("Erro interno do servidor:", error);
+        res.status(500).json({ 
+            success: false, 
+            message: "Erro no servidor Render: " + error.message 
+        });
     }
 });
 
