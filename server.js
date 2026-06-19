@@ -10,25 +10,30 @@ app.post('/v1.0/login', async (req, res) => {
     try {
         console.log("Tentando login na IQ Option para:", req.body.email);
 
-        const response = await fetch('https://iqoption.com/api/v1.0/login', {
+        // 1. Mudamos a URL para o servidor de AUTENTICAÇÃO da IQ Option (auth.iqoption.com)
+        const response = await fetch('https://auth.iqoption.com/api/v1.0/login', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                // 2. Disfarçamos o nosso robô como se fosse o navegador Google Chrome no Windows
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            },
             body: JSON.stringify(req.body)
         });
 
-        // 1. Lê a resposta como texto puro primeiro (não quebra o código)
         const textData = await response.text();
         console.log("Resposta bruta da IQ:", textData);
 
         try {
-            // 2. Tenta converter para JSON. Se for um login normal, funciona.
+            // Tenta converter a resposta para JSON
             const jsonData = JSON.parse(textData);
             res.json(jsonData);
         } catch (e) {
-            // 3. Se a IQ Option mandar HTML ou erro de segurança, mostramos na tela!
+            // Se der erro, mostra o que a IQ Option respondeu
             res.status(400).json({ 
                 success: false, 
-                message: "IQ Option bloqueou/mudou a rota. Resposta deles: " + textData.substring(0, 150) 
+                message: "IQ Option rejeitou o formato. Resposta: " + textData.substring(0, 150) 
             });
         }
 
@@ -39,3 +44,4 @@ app.post('/v1.0/login', async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+        
