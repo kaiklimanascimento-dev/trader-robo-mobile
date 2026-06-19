@@ -43,7 +43,8 @@ class IQOptionAPI {
                 this.connectWebSocket();
                 return { success: true, data: data };
             } else {
-                return { success: false, message: data.message || 'Erro detalhado: " + error.message' };
+                return { success: false, message: data.message || "Erro desconhecido" };
+
             }
         } catch (error) {
             console.error('Erro ao fazer login:', error);
