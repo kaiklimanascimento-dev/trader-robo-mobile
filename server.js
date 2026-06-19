@@ -8,7 +8,7 @@ app.use(express.json());
 
 app.post('/v1.0/login', async (req, res) => {
     try {
-        console.log("Tentando login para:", req.body.email);
+        console.log("Tentando login na IQ Option para:", req.body.email);
 
         const response = await fetch('https://iqoption.com/api/v1.0/login', {
             method: 'POST',
@@ -16,12 +16,25 @@ app.post('/v1.0/login', async (req, res) => {
             body: JSON.stringify(req.body)
         });
 
-        const data = await response.json();
-        res.json(data);
+        // 1. Lê a resposta como texto puro primeiro (não quebra o código)
+        const textData = await response.text();
+        console.log("Resposta bruta da IQ:", textData);
+
+        try {
+            // 2. Tenta converter para JSON. Se for um login normal, funciona.
+            const jsonData = JSON.parse(textData);
+            res.json(jsonData);
+        } catch (e) {
+            // 3. Se a IQ Option mandar HTML ou erro de segurança, mostramos na tela!
+            res.status(400).json({ 
+                success: false, 
+                message: "IQ Option bloqueou/mudou a rota. Resposta deles: " + textData.substring(0, 150) 
+            });
+        }
+
     } catch (error) {
-        // Isto vai mostrar o erro real no log do Render e no teu celular
-        console.error("Erro real na ponte:", error);
-        res.status(500).json({ success: false, message: "Erro real: " + error.message });
+        console.error("Erro no fetch:", error);
+        res.status(500).json({ success: false, message: "Erro de conexão: " + error.message });
     }
 });
 
