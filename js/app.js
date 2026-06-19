@@ -4,55 +4,75 @@ class TraderRobot {
         this.api = new IQOptionAPI();
         this.strategies = new PriceActionStrategies();
         this.analysis = new ProfessionalAnalysis();
-        
+
         this.isRunning = false;
         this.currentTrade = null;
         this.martingaleCount = 0;
         this.sessionProfit = 0;
         this.trades = [];
-        
+
         this.chart = null;
         this.priceData = [];
         this.timeLabels = [];
-        
+
         this.initEventListeners();
+        this.setupLoginCallback();
     }
 
     initEventListeners() {
         // Login
-        document.getElementById('loginForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleLogin();
-        });
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleLogin();
+            });
+        }
 
         // Robot Controls
-        document.getElementById('startBtn').addEventListener('click', () => this.startRobot());
-        document.getElementById('stopBtn').addEventListener('click', () => this.stopRobot());
-        document.getElementById('logoutBtn').addEventListener('click', () => this.handleLogout());
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+
+        if (startBtn) startBtn.addEventListener('click', () => this.startRobot());
+        if (stopBtn) stopBtn.addEventListener('click', () => this.stopRobot());
+        if (logoutBtn) logoutBtn.addEventListener('click', () => this.handleLogout());
     }
 
-    // ===== LOGIN =====
+    // Configura o ouvinte para quando o WebSocket confirmar o login com sucesso
+    setupLoginCallback() {
+        window.onLoginSuccess = (profileData) => {
+            console.log('Login validado com sucesso via WebSocket!', profileData);
+            this.showDashboard();
+            this.updateUserInfo();
+            alert('Conectado com sucesso!');
+        };
+    }
+
+    // ====== LOGIN ======
     async handleLogin() {
         const email = document.getElementById('email').value;
         const password = document.getElementById('password').value;
         const accountType = document.getElementById('accountType').value;
 
         if (!email || !password) {
-            alert('Por favor, preencha email e senha');
+            alert('Por favor, preencha email e senha.');
             return;
         }
 
         try {
+            const submitBtn = document.querySelector('#loginForm button[type="submit"]');
+            if (submitBtn) submitBtn.innerText = 'CONECTANDO VIA WEBSOCKET...';
+
             const result = await this.api.login(email, password, accountType);
-            
-            if (result.success) {
-                this.showDashboard();
-                this.updateUserInfo();
-                alert('✅ Conectado com sucesso!');
-            } else {
-                alert('❌ Erro: ' + result.message);
+
+            if (!result.success) {
+                if (submitBtn) submitBtn.innerText = 'CONECTAR';
+                alert('Erro: ' + result.message);
             }
         } catch (error) {
+            const submitBtn = document.querySelector('#loginForm button[type="submit"]');
+            if (submitBtn) submitBtn.innerText = 'CONECTAR';
             alert(error.message);
         }
     }
@@ -67,60 +87,57 @@ class TraderRobot {
 
     updateUserInfo() {
         const accountType = document.getElementById('accountType').value;
-        document.getElementById('userInfo').innerHTML = `
-            <span>🟢 Conectado | ${accountType} | Saldo: R$ ${this.api.balance.toFixed(2)}</span>
-        `;
+        const userInfo = document.getElementById('userInfo');
+        if (userInfo) {
+            userInfo.innerHTML = `
+                <span class="status-badge conectado" style="color: #28a745;">
+                    Conectado | ${accountType} | Saldo: R$ ${this.api.balance.toFixed(2)}
+                </span>
+            `;
+        }
     }
 
-    // ===== CHART =====
+    // ====== CHART ======
     initChart() {
-        const ctx = document.getElementById('priceChart').getContext('2d');
-        this.chart = new Chart(ctx, {
+        const ctx = document.getElementById('priceChart');
+        if (!ctx) return;
+        if (this.chart) this.chart.destroy();
+
+        this.chart = new Chart(ctx.getContext('2d'), {
             type: 'line',
             data: {
                 labels: this.timeLabels,
                 datasets: [{
                     label: 'Preço',
                     data: this.priceData,
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    borderColor: '#00d76d',
+                    backgroundColor: 'rgba(0, 215, 109, 0.1)',
                     borderWidth: 2,
                     fill: true,
                     tension: 0.4,
-                    pointRadius: 3,
-                    pointBackgroundColor: '#667eea'
+                    pointRadius: 2,
+                    pointBackgroundColor: '#00d76d'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: false
-                    }
-                }
+                plugins: { legend: { display: true, position: 'top' } },
+                scales: { y: { beginAtZero: false } }
             }
         });
     }
-
-    // ===== ROBOT LOGIC =====
+    // ====== ROBOT LOGIC ======
     async startRobot() {
         const initialBet = parseFloat(document.getElementById('initialBet').value);
-        const stopWin = parseFloat(document.getElementById('stopWin').value);
-        const stopLoss = parseFloat(document.getElementById('stopLoss').value);
+        const stopwin = parseFloat(document.getElementById('stopwin').value);
+        const stoploss = parseFloat(document.getElementById('stoploss').value);
 
-        if (this.sessionProfit >= stopWin) {
-            alert('✅ Stop Win atingido! Robô parado.');
+        if (this.sessionProfit >= stopwin) {
+            alert('🏆 Stop Win atingido! Robô parado.');
             return;
         }
-
-        if (this.sessionProfit <= -stopLoss) {
+        if (this.sessionProfit <= -stoploss) {
             alert('❌ Stop Loss atingido! Robô parado.');
             return;
         }
@@ -131,7 +148,7 @@ class TraderRobot {
 
         while (this.isRunning) {
             await this.executeTrade(initialBet);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Aguardar 5 segundos
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
     }
 
@@ -140,57 +157,39 @@ class TraderRobot {
         const strategy = document.getElementById('strategy').value;
         const timeframe = document.getElementById('timeframe').value;
         const expiration = parseInt(document.getElementById('expiration').value);
-        const martingale = parseFloat(document.getElementById('martingale').value);
+        const martingale = parseInt(document.getElementById('martingale').value);
 
         try {
-            // Obter dados de preço
             const candles = await this.api.getPriceHistory(asset, timeframe, 50);
-            
             if (candles.length === 0) {
-                console.log('Sem dados de preço');
+                console.log('Sem dados de preço.');
                 return;
             }
 
-            // Analisar estratégia
             let signal = null;
-            if (strategy === 'fluxo') {
-                signal = this.strategies.analyzeFluxo(candles);
-            } else if (strategy === 'reversao') {
-                signal = this.strategies.analyzeReversao(candles);
-            } else if (strategy === 'hibrida') {
-                signal = this.strategies.analyzeHibrida(candles);
-            }
+            if (strategy === 'fluxo') signal = this.strategies.analyzeFluxo(candles);
+            else if (strategy === 'reversa') signal = this.strategies.analyzeReversa(candles);
+            else if (strategy === 'hibrida') signal = this.strategies.analyzeHibrida(candles);
 
             if (!signal || !signal.direction) {
-                console.log('Sem sinal claro');
+                console.log('Sem sinal claro.');
                 return;
             }
 
-            // Calcular entrada com martingale
             const tradeAmount = this.martingaleCount > 0 
                 ? baseAmount * Math.pow(martingale, this.martingaleCount)
                 : baseAmount;
 
-            // Atualizar UI
             this.updateTradeInfo(signal, tradeAmount, asset);
 
-            // Colocar operação
             const result = await this.api.placeBet(asset, signal.direction, tradeAmount, expiration);
-
             if (result.success) {
                 this.currentTrade = {
-                    asset,
-                    direction: signal.direction,
-                    amount: tradeAmount,
-                    price: signal.price,
-                    time: new Date(),
-                    signal: signal.signal,
-                    confidence: signal.confidence
+                    asset, direction: signal.direction, amount: tradeAmount,
+                    price: signal.price, time: new Date(), signal: signal.signal, confidence: signal.confidence
                 };
 
-                // Simular resultado (em produção, aguardar resultado real)
                 await new Promise(resolve => setTimeout(resolve, expiration * 1000));
-                
                 const tradeResult = this.simulateTradeResult(signal.confidence);
                 this.handleTradeResult(tradeResult, tradeAmount);
             }
@@ -207,36 +206,30 @@ class TraderRobot {
     handleTradeResult(result, amount) {
         if (result === 'WIN') {
             this.sessionProfit += amount;
-            this.martingaleCount = 0; // Reset martingale
+            this.martingaleCount = 0;
             this.strategies.stats.wins++;
         } else {
             this.sessionProfit -= amount;
-            this.martingaleCount++; // Próxima entrada será martingale
+            this.martingaleCount++;
             this.strategies.stats.losses++;
         }
 
-        // Registrar trade
         const trade = {
-            time: new Date(),
-            asset: this.currentTrade.asset,
-            direction: this.currentTrade.direction,
-            amount,
-            result,
-            profit: result === 'WIN' ? amount : -amount
+            time: new Date(), asset: this.currentTrade.asset, direction: this.currentTrade.direction,
+            amount: amount, result: result, profit: result === 'WIN' ? amount : -amount
         };
 
         this.trades.push(trade);
         this.updateTradeHistory(trade);
         this.updateStats();
 
-        // Verificar Stop Win/Loss
-        const stopWin = parseFloat(document.getElementById('stopWin').value);
-        const stopLoss = parseFloat(document.getElementById('stopLoss').value);
+        const stopwin = parseFloat(document.getElementById('stopwin').value);
+        const stoploss = parseFloat(document.getElementById('stoploss').value);
 
-        if (this.sessionProfit >= stopWin) {
-            alert('✅ Stop Win atingido! Robô parado.');
+        if (this.sessionProfit >= stopwin) {
+            alert('🏆 Stop Win atingido! Robô parado.');
             this.stopRobot();
-        } else if (this.sessionProfit <= -stopLoss) {
+        } else if (this.sessionProfit <= -stoploss) {
             alert('❌ Stop Loss atingido! Robô parado.');
             this.stopRobot();
         }
@@ -246,39 +239,34 @@ class TraderRobot {
         this.isRunning = false;
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
-        alert('Robô parado!');
     }
 
-    // ===== UI UPDATES =====
     updateTradeInfo(signal, amount, asset) {
-        document.getElementById('tradeStatus').textContent = '🔄 Em execução...';
+        document.getElementById('tradeStatus').textContent = 'Em execução...';
         document.getElementById('tradeEntry').textContent = `R$ ${amount.toFixed(2)}`;
-        document.getElementById('tradeDirection').textContent = signal.direction === 'CALL' ? '📈 SUBIDA' : '📉 QUEDA';
-        document.getElementById('tradePrice').textContent = signal.price.toFixed(4);
+        document.getElementById('tradeDirection').textContent = signal.direction === 'CALL' ? '🔼 SUBIDA' : '🔽 QUEDA';
+        document.getElementById('tradePrice').textContent = signal.price ? signal.price.toFixed(4) : '-';
         document.getElementById('tradeTime').textContent = new Date().toLocaleTimeString('pt-BR');
         document.getElementById('tradeMartingale').textContent = this.martingaleCount;
     }
 
     updateTradeHistory(trade) {
         const historyBody = document.getElementById('historyBody');
+        if (!historyBody) return;
         const row = historyBody.insertRow(0);
-        
         const resultClass = trade.result === 'WIN' ? 'win' : 'loss';
-        const resultText = trade.result === 'WIN' ? '✅ WIN' : '❌ LOSS';
-        
+        const resultText = trade.result === 'WIN' ? '🏆 WIN' : '❌ LOSS';
+
         row.innerHTML = `
             <td>${trade.time.toLocaleTimeString('pt-BR')}</td>
             <td>${trade.asset}</td>
-            <td>${trade.direction === 'CALL' ? '📈' : '📉'}</td>
+            <td>${trade.direction === 'CALL' ? 'CALL' : 'PUT'}</td>
             <td>R$ ${trade.amount.toFixed(2)}</td>
             <td class="${resultClass}">${resultText}</td>
             <td class="${resultClass}">R$ ${trade.profit.toFixed(2)}</td>
         `;
 
-        // Manter apenas últimas 20 operações visíveis
-        while (historyBody.rows.length > 20) {
-            historyBody.deleteRow(historyBody.rows.length - 1);
-        }
+        while (historyBody.rows.length > 10) historyBody.deleteRow(historyBody.rows.length - 1);
     }
 
     updateStats() {
@@ -302,8 +290,7 @@ class TraderRobot {
 
         if (candles.length > 0) {
             this.priceData = candles.map(c => c.close);
-            this.timeLabels = candles.map((c, i) => i % 5 === 0 ? i : '');
-
+            this.timeLabels = candles.map((c, i) => i % 5 === 0 ? '' : '');
             if (this.chart) {
                 this.chart.data.labels = this.timeLabels;
                 this.chart.data.datasets[0].data = this.priceData;
@@ -318,50 +305,38 @@ class TraderRobot {
 
         if (candles.length > 0) {
             const analysis = this.analysis.analyzeAsset(candles, asset);
-
-            // Suporte e Resistência
             document.getElementById('supportResistance').innerHTML = `
                 <strong>Preço:</strong> ${analysis.supportResistance.currentPrice}<br>
-                <strong>Suporte:</strong> ${analysis.supportResistance.support.s1}<br>
-                <strong>Resistência:</strong> ${analysis.supportResistance.resistance.r1}<br>
+                <strong>Suporte:</strong> ${analysis.supportResistance.support.sr}<br>
+                <strong>Resistência:</strong> ${analysis.supportResistance.resistance.sr}<br>
                 <em>${analysis.supportResistance.interpretation}</em>
             `;
-
-            // Tendência
             document.getElementById('trend').innerHTML = `
                 <strong>Tipo:</strong> ${analysis.trend.type}<br>
                 <strong>Força:</strong> ${analysis.trend.strength}<br>
                 <strong>ADX:</strong> ${analysis.trend.adxValue}<br>
                 <em>${analysis.trend.interpretation}</em>
             `;
-
-            // Volumes
             document.getElementById('volumes').innerHTML = `
                 <strong>Ratio:</strong> ${analysis.volumes.ratio}<br>
                 <strong>Interpretação:</strong> ${analysis.volumes.interpretation}<br>
-                <strong>Recomendação:</strong> ${analysis.volumes.recommendation}
+                <strong>Recomendações:</strong> ${analysis.volumes.recommendation}
             `;
-
-            // Padrões
             const patternsHTML = analysis.patterns.patterns.length > 0
-                ? analysis.patterns.patterns.map(p => `<p>🔹 ${p.name} (${p.strength})</p>`).join('')
+                ? analysis.patterns.patterns.map(p => `<p>🎯 <strong>${p.name}</strong> (${p.strength})</p>`).join('')
                 : '<p>Nenhum padrão detectado</p>';
-
-            document.getElementById('patterns').innerHTML = `
-                ${patternsHTML}
-                <em>${analysis.patterns.recommendation}</em>
-            `;
+            document.getElementById('patterns').innerHTML = `${patternsHTML}<h5>${analysis.patterns.recommendation}</h5>`;
         }
     }
 
-    // ===== LOGOUT =====
     handleLogout() {
         this.stopRobot();
         this.api.logout();
         document.getElementById('dashboardSection').classList.remove('active');
         document.getElementById('analysisSection').classList.remove('active');
         document.getElementById('loginSection').classList.add('active');
-        document.getElementById('loginForm').reset();
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) loginForm.reset();
         alert('Desconectado!');
     }
 }
@@ -370,5 +345,5 @@ class TraderRobot {
 let robot;
 document.addEventListener('DOMContentLoaded', () => {
     robot = new TraderRobot();
-    console.log('🤖 Robô Trader Mobile iniciado!');
+    console.log('🤖 Robô Trader Mobile Iniciado com WebSocket!');
 });
