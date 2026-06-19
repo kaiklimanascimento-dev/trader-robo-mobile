@@ -53,7 +53,7 @@ class TraderRobot {
                 alert('❌ Erro: ' + result.message);
             }
         } catch (error) {
-            alert('Erro ao conectar: ' + error.message);
+            alert(error.message);
         }
     }
 
