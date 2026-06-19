@@ -5,7 +5,7 @@ class IQOptionAPI {
         this.userId = null;
         this.balance = 0;
         this.sessionId = null;
-        this.baseURL = 'https://meu-robo-trader-jai2.onrender.com/';
+        this.baseURL = 'https://meu-robo-trader-jai2.onrender.com';
         this.wsURL = 'wss://iqoption.com/echo/websocket';
         this.ws = null;
         this.priceHistory = {};
