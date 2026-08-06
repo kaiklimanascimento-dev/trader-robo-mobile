@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
 const app = express();
 
 app.use(cors());
@@ -47,6 +49,17 @@ function simulatePriceData(asset, count = 50) {
   return candles;
 }
 
+// Helper to create a single new tick (latest candle)
+function generateTick(asset) {
+  const base = (asset === 'BTCUSD') ? 42000 : (asset === 'USDJPY' ? 110.5 : (asset === 'GBPUSD' ? 1.265 : (asset === 'USDCAD' ? 1.255 : 1.085)));
+  const variance = (Math.random() - 0.5) * 0.002;
+  const open = base + variance;
+  const close = open + (Math.random() - 0.5) * 0.001;
+  const high = Math.max(open, close) + Math.abs(Math.random()) * 0.001;
+  const low = Math.min(open, close) - Math.abs(Math.random()) * 0.001;
+  return { open, close, high, low, volume: Math.random() * 1000, time: Date.now() };
+}
+
 // Endpoint de login (mock) compatível com o wrapper frontend
 app.post('/v1.0/login', (req, res) => {
   const { email, password, account_type } = req.body || {};
@@ -62,7 +75,7 @@ app.post('/v1.0/login', (req, res) => {
   sessions[token] = { userId, email, balance, account_type };
 
   // Resposta com diferentes formatos esperados pelo frontend
-  return res.json({
+  const payload = {
     success: true,
     sessionData: {
       userId,
@@ -71,7 +84,16 @@ app.post('/v1.0/login', (req, res) => {
       sessionData: token
     },
     message: 'Login mock realizado com sucesso'
-  });
+  };
+
+  // Emitir evento via WebSocket para clientes conectados (ex.: frontend esperando onLoginSuccess)
+  try {
+    broadcastWS({ type: 'login_success', session: token, userId, balance });
+  } catch (e) {
+    // no-op
+  }
+
+  return res.json(payload);
 });
 
 // Endpoint para retornar candles simulados
@@ -101,6 +123,12 @@ app.post('/api/trades/place', (req, res) => {
   if (typeof amount === 'number') session.balance = Math.max(0, session.balance - amount);
 
   const tradeId = 'trade_' + generateToken().slice(0, 8);
+
+  // Emitir evento de trade para frontend (opcional)
+  try {
+    broadcastWS({ type: 'trade_placed', tradeId, userId: session.userId, asset, direction, amount });
+  } catch (e) {}
+
   return res.json({ success: true, tradeId, status: 'placed' });
 });
 
@@ -113,5 +141,49 @@ app.get('/api/profile/balance', (req, res) => {
   return res.json({ balance: session.balance });
 });
 
+// Criar servidor HTTP+WebSocket
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+function broadcastWS(data) {
+  const msg = JSON.stringify(data);
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+}
+
+// Quando um cliente WS conectar, enviar uma mensagem de boas-vindas e começar a enviar ticks se pedir
+wss.on('connection', (ws, req) => {
+  ws.send(JSON.stringify({ type: 'welcome', message: 'Connected to mock websocket' }));
+
+  ws.on('message', (message) => {
+    // Espera mensagens JSON simples com ação, por exemplo: { action: 'subscribe', asset: 'EURUSD' }
+    try {
+      const obj = JSON.parse(message.toString());
+      if (obj && obj.action === 'subscribe' && obj.asset) {
+        // Enviar imediatamente algumas candles
+        const candles = simulatePriceData(obj.asset, 50);
+        ws.send(JSON.stringify({ type: 'candles', asset: obj.asset, candles }));
+
+        // Opcional: enviar ticks periódicos para esse cliente específico
+        if (!ws._tickInterval) {
+          ws._tickInterval = setInterval(() => {
+            const tick = generateTick(obj.asset);
+            ws.send(JSON.stringify({ type: 'tick', asset: obj.asset, tick }));
+          }, 5000);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws._tickInterval) clearInterval(ws._tickInterval);
+  });
+});
+
+server.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
