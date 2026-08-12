@@ -1,189 +1,253 @@
 const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const http = require('http');
-const WebSocket = require('ws');
-const app = express();
+const cors    = require('cors');
+const path    = require('path');
+const { IQOptionClient, Direction, TimeFrame } = require('iqoptionapi-node');
 
+const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Servir arquivos estáticos (index.html, js/, css/)
 app.use(express.static(path.join(__dirname)));
 
-// Sessões em memória (mock)
-const sessions = {};
+const sessions = {};  // sessions[token] = { client, profile, accountType }
+const orderMap = {};  // orderMap[orderId] = token
 
 function generateToken() {
-  return (Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
-function simulatePriceData(asset, count = 50) {
-  const basePrice = {
-    'EURUSD': 1.0850,
-    'GBPUSD': 1.2650,
-    'USDJPY': 110.50,
-    'USDCAD': 1.2550,
-    'BTCUSD': 42000
+function mapTimeframe(tf) {
+  const map = {
+    S1: TimeFrame.S1, M1: TimeFrame.M1, M5: TimeFrame.M5,
+    M15: TimeFrame.M15, M30: TimeFrame.M30,
+    H1: TimeFrame.H1,  H4: TimeFrame.H4, D1: TimeFrame.D1,
   };
-  const base = basePrice[asset] || 1.0;
-  const candles = [];
-
-  for (let i = 0; i < count; i++) {
-    const variance = (Math.random() - 0.5) * 0.005;
-    const open = base + variance;
-    const close = open + (Math.random() - 0.5) * 0.003;
-    const high = Math.max(open, close) + Math.abs(Math.random()) * 0.002;
-    const low = Math.min(open, close) - Math.abs(Math.random()) * 0.002;
-
-    candles.push({
-      open,
-      close,
-      high,
-      low,
-      volume: Math.random() * 1000,
-      time: Date.now() - (count - i) * 60000
-    });
-  }
-
-  return candles;
+  return map[tf] || TimeFrame.M1;
 }
 
-// Helper to create a single new tick (latest candle)
-function generateTick(asset) {
-  const base = (asset === 'BTCUSD') ? 42000 : (asset === 'USDJPY' ? 110.5 : (asset === 'GBPUSD' ? 1.265 : (asset === 'USDCAD' ? 1.255 : 1.085)));
-  const variance = (Math.random() - 0.5) * 0.002;
-  const open = base + variance;
-  const close = open + (Math.random() - 0.5) * 0.001;
-  const high = Math.max(open, close) + Math.abs(Math.random()) * 0.001;
-  const low = Math.min(open, close) - Math.abs(Math.random()) * 0.001;
-  return { open, close, high, low, volume: Math.random() * 1000, time: Date.now() };
+function getSession(req) {
+  const auth = (req.headers['authorization'] || '').replace('Bearer ', '');
+  return sessions[auth] ? { token: auth, ...sessions[auth] } : null;
 }
 
-// Endpoint de login (mock) compatível com o wrapper frontend
-app.post('/v1.0/login', (req, res) => {
+// ── Login ────────────────────────────────────────────────────────────────────
+app.post('/api/login', async (req, res) => {
   const { email, password, account_type } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ success: false, message: 'Email ou senha ausente' });
   }
 
-  // Criar sessão mock
-  const token = generateToken();
-  const userId = 'user_' + token.slice(0, 8);
-  const balance = 1000 + Math.floor(Math.random() * 500); // saldo inicial mock
-
-  sessions[token] = { userId, email, balance, account_type };
-
-  // Resposta com diferentes formatos esperados pelo frontend
-  const payload = {
-    success: true,
-    sessionData: {
-      userId,
-      balance,
-      session: token,
-      sessionData: token
-    },
-    message: 'Login mock realizado com sucesso'
-  };
-
-  // Emitir evento via WebSocket para clientes conectados (ex.: frontend esperando onLoginSuccess)
-  try {
-    broadcastWS({ type: 'login_success', session: token, userId, balance });
-  } catch (e) {
-    // no-op
+  // Validar tipo de conta solicitado
+  const requestedType = (account_type || 'PRACTICE').toUpperCase();
+  if (!['PRACTICE', 'REAL'].includes(requestedType)) {
+    return res.status(400).json({ success: false, message: 'Tipo de conta inválido. Use PRACTICE ou REAL.' });
   }
 
-  return res.json(payload);
-});
-
-// Endpoint para retornar candles simulados
-app.get('/api/candles/:asset', (req, res) => {
-  const asset = req.params.asset;
-  const timeframe = req.query.timeframe || 'M1';
-  const count = parseInt(req.query.count || '50');
-
-  const candles = simulatePriceData(asset, count);
-  return res.json({ candles, timeframe });
-});
-
-// Endpoint para colocar operação (mock)
-app.post('/api/trades/place', (req, res) => {
-  const auth = req.headers['authorization'] || '';
-  const token = auth.replace('Bearer ', '');
-  const session = sessions[token];
-
-  const { userId, asset, direction, amount } = req.body || {};
-  if (!session) {
-    // allow placing trades without auth in mock, but return a warning
-    const tradeId = 'trade_' + generateToken().slice(0, 8);
-    return res.json({ success: true, tradeId, status: 'placed', warning: 'mock-without-auth' });
-  }
-
-  // Deduzir saldo mock (não persiste entre reinícios)
-  if (typeof amount === 'number') session.balance = Math.max(0, session.balance - amount);
-
-  const tradeId = 'trade_' + generateToken().slice(0, 8);
-
-  // Emitir evento de trade para frontend (opcional)
   try {
-    broadcastWS({ type: 'trade_placed', tradeId, userId: session.userId, asset, direction, amount });
-  } catch (e) {}
+    const client = new IQOptionClient({ silent: true });
+    await client.connect();
+    const profile = await client.login({ email, password });
 
-  return res.json({ success: true, tradeId, status: 'placed' });
-});
-
-// Endpoint para obter saldo do perfil
-app.get('/api/profile/balance', (req, res) => {
-  const auth = req.headers['authorization'] || '';
-  const token = auth.replace('Bearer ', '');
-  const session = sessions[token];
-  if (!session) return res.status(401).json({ success: false, message: 'Sessão inválida' });
-  return res.json({ balance: session.balance });
-});
-
-// Criar servidor HTTP+WebSocket
-const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-
-function broadcastWS(data) {
-  const msg = JSON.stringify(data);
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
-  });
-}
-
-// Quando um cliente WS conectar, enviar uma mensagem de boas-vindas e começar a enviar ticks se pedir
-wss.on('connection', (ws, req) => {
-  ws.send(JSON.stringify({ type: 'welcome', message: 'Connected to mock websocket' }));
-
-  ws.on('message', (message) => {
-    // Espera mensagens JSON simples com ação, por exemplo: { action: 'subscribe', asset: 'EURUSD' }
-    try {
-      const obj = JSON.parse(message.toString());
-      if (obj && obj.action === 'subscribe' && obj.asset) {
-        // Enviar imediatamente algumas candles
-        const candles = simulatePriceData(obj.asset, 50);
-        ws.send(JSON.stringify({ type: 'candles', asset: obj.asset, candles }));
-
-        // Opcional: enviar ticks periódicos para esse cliente específico
-        if (!ws._tickInterval) {
-          ws._tickInterval = setInterval(() => {
-            const tick = generateTick(obj.asset);
-            ws.send(JSON.stringify({ type: 'tick', asset: obj.asset, tick }));
-          }, 5000);
+    // Tentar trocar para a conta solicitada se o SDK suportar
+    let activeAccountType = profile.accountType || 'PRACTICE';
+    if (requestedType === 'REAL' && activeAccountType !== 'REAL') {
+      try {
+        // Alguns builds do SDK expõem changeBalance ou switchAccount
+        if (typeof client.changeBalance === 'function') {
+          await client.changeBalance('REAL');
+          activeAccountType = 'REAL';
+        } else if (typeof client.switchAccount === 'function') {
+          await client.switchAccount('REAL');
+          activeAccountType = 'REAL';
+        } else {
+          // SDK não suporta troca — informar ao frontend
+          console.warn('SDK não suporta troca para conta REAL. Mantendo PRACTICE.');
+          activeAccountType = 'PRACTICE';
         }
+      } catch (switchErr) {
+        console.warn('Falha ao trocar para conta REAL:', switchErr.message);
+        activeAccountType = profile.accountType || 'PRACTICE';
       }
-    } catch (e) {
-      // ignore
     }
-  });
 
-  ws.on('close', () => {
-    if (ws._tickInterval) clearInterval(ws._tickInterval);
-  });
+    const token = generateToken();
+    sessions[token] = { client, profile, accountType: activeAccountType };
+
+    return res.json({
+      success: true,
+      sessionData: {
+        userId:          String(profile.userId),
+        balance:         profile.balance,
+        session:         token,
+        sessionData:     token,
+        currency:        profile.currency || 'BRL',
+        name:            [profile.firstName, profile.lastName].filter(Boolean).join(' ') || email,
+        accountType:     activeAccountType,
+        requestedType,
+        // Avisa se não conseguiu ativar a conta solicitada
+        accountWarning:  requestedType !== activeAccountType
+          ? `Não foi possível ativar conta ${requestedType}. Conectado em ${activeAccountType}.`
+          : null,
+      },
+      message: `Conectado em conta ${activeAccountType}!`,
+    });
+  } catch (err) {
+    console.error('Erro no login:', err.message);
+    return res.status(401).json({ success: false, message: 'Falha na autenticação: ' + err.message });
+  }
 });
 
-server.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// ── Trocar tipo de conta (Demo ↔ Real) após login ──────────────────────────
+app.post('/api/account/switch', async (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ success: false, message: 'Sessão inválida' });
+
+  const { account_type } = req.body || {};
+  const targetType = (account_type || 'PRACTICE').toUpperCase();
+
+  if (!['PRACTICE', 'REAL'].includes(targetType)) {
+    return res.status(400).json({ success: false, message: 'Tipo inválido. Use PRACTICE ou REAL.' });
+  }
+
+  try {
+    if (typeof session.client.changeBalance === 'function') {
+      await session.client.changeBalance(targetType);
+    } else if (typeof session.client.switchAccount === 'function') {
+      await session.client.switchAccount(targetType);
+    } else {
+      return res.status(501).json({
+        success: false,
+        message: 'Troca de conta não suportada por esta versão do SDK. Faça logout e login novamente selecionando a conta desejada.'
+      });
+    }
+
+    sessions[session.token].accountType = targetType;
+    const profile = session.client.getProfile?.() || session.profile;
+
+    return res.json({
+      success: true,
+      accountType: targetType,
+      balance: profile?.balance ?? session.profile.balance,
+      message: `Conta trocada para ${targetType} com sucesso!`,
+    });
+  } catch (err) {
+    console.error('Erro ao trocar conta:', err.message);
+    return res.status(500).json({ success: false, message: 'Erro ao trocar conta: ' + err.message });
+  }
+});
+
+// ── Candles ──────────────────────────────────────────────────────────────────
+app.get('/api/candles/:asset', async (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ error: 'Sessão inválida' });
+
+  const asset     = req.params.asset;
+  const timeframe = req.query.timeframe || 'M1';
+  const count     = Math.min(parseInt(req.query.count || '50'), 500);
+
+  try {
+    const candles = await session.client.getCandles(asset, mapTimeframe(timeframe), count);
+    return res.json({ candles, timeframe });
+  } catch (err) {
+    console.error('Erro ao buscar candles:', err.message);
+    return res.status(502).json({ error: 'Falha ao obter cotações: ' + err.message });
+  }
+});
+
+// ── Colocar operação ─────────────────────────────────────────────────────────
+app.post('/api/trades/place', async (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ success: false, message: 'Sessão inválida' });
+
+  const { asset, direction, amount, expiration } = req.body || {};
+  if (!asset || !direction || !amount) {
+    return res.status(400).json({ success: false, message: 'Parâmetros ausentes' });
+  }
+
+  // Bloco de segurança extra: logar operações em conta REAL
+  if (session.accountType === 'REAL') {
+    console.log(`⚠️  OPERAÇÃO REAL: ${direction} ${asset} R$${amount} exp:${expiration}min`);
+  }
+
+  try {
+    const dir             = direction === 'CALL' ? Direction.Call : Direction.Put;
+    const durationSeconds = Math.max(Math.round((expiration || 1) * 60), 60);
+
+    const { orderId } = await session.client.buyBinaryOption({
+      symbol: asset,
+      direction: dir,
+      amount: parseFloat(amount),
+      durationSeconds,
+    });
+
+    orderMap[orderId] = session.token;
+
+    return res.json({
+      success: true,
+      tradeId: orderId,
+      status:  'placed',
+      accountType: session.accountType,
+      durationSeconds,
+    });
+  } catch (err) {
+    console.error('Erro ao colocar operação:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── Resultado da operação ────────────────────────────────────────────────────
+app.get('/api/trades/result/:orderId', async (req, res) => {
+  const orderId   = req.params.orderId;
+  const token     = orderMap[orderId];
+  if (!token || !sessions[token]) {
+    return res.status(404).json({ success: false, message: 'Ordem não encontrada' });
+  }
+  const timeoutMs = parseInt(req.query.timeoutMs || '15000');
+  try {
+    const result = await sessions[token].client.checkBinaryOptionResult(orderId, timeoutMs);
+    delete orderMap[orderId];
+    return res.json({
+      success:      true,
+      orderId:      result.orderId,
+      win:          result.win,
+      profitAmount: result.profitAmount,
+    });
+  } catch (err) {
+    console.error('Erro ao consultar resultado:', err.message);
+    return res.status(504).json({ success: false, message: 'Tempo esgotado: ' + err.message });
+  }
+});
+
+// ── Saldo ────────────────────────────────────────────────────────────────────
+app.get('/api/profile/balance', async (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ success: false, message: 'Sessão inválida' });
+  try {
+    const profile = session.client.getProfile?.();
+    return res.json({
+      balance:     profile?.balance ?? session.profile.balance,
+      accountType: session.accountType,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── Logout ───────────────────────────────────────────────────────────────────
+app.post('/api/logout', (req, res) => {
+  const session = getSession(req);
+  if (session) {
+    try { session.client.disconnect(); } catch (_) {}
+    delete sessions[session.token];
+  }
+  res.json({ success: true });
+});
+
+// ── Status ───────────────────────────────────────────────────────────────────
+app.get('/api/status', (req, res) => {
+  res.json({ ok: true, sessions: Object.keys(sessions).length });
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Trader Robô Mobile — porta ${PORT}`);
+});
